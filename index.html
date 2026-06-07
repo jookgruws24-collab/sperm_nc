@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Night Crows Growth Ranking</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="toolbar" aria-label="Ranking tools">
+        <div>
+          <p class="eyebrow">Night Crows</p>
+          <h1>Growth Ranking</h1>
+        </div>
+        <div class="meta">
+          <span id="visibleCount">0</span>
+          <span>rows</span>
+        </div>
+      </section>
+
+      <section class="filters" aria-label="Table filters">
+        <label>
+          <span>Region</span>
+          <select id="regionSelect">
+            <option value="0">All</option>
+            <option value="2010">ASIA</option>
+            <option value="3010">NAEU</option>
+            <option value="4010">SA</option>
+          </select>
+        </label>
+        <label>
+          <span>Ranking</span>
+          <input id="filter-ranking" type="search" autocomplete="off" placeholder="Search ranking">
+        </label>
+        <label>
+          <span>Character</span>
+          <input id="filter-character" type="search" autocomplete="off" placeholder="Search character">
+        </label>
+        <label>
+          <span>Class</span>
+          <select id="filter-class">
+            <option value="">All Classes</option>
+          </select>
+        </label>
+        <label>
+          <span>Server</span>
+          <input id="filter-server" type="search" autocomplete="off" placeholder="Search server">
+        </label>
+        <label>
+          <span>Guild</span>
+          <input id="filter-guild" type="search" autocomplete="off" placeholder="Search guild">
+        </label>
+        <label>
+          <span>Union</span>
+          <input id="filter-union" type="search" autocomplete="off" placeholder="Search union">
+        </label>
+      </section>
+
+      <section class="table-wrap" aria-label="Growth ranking table">
+        <table>
+          <thead>
+            <tr>
+              <th>Ranking</th>
+              <th>Character</th>
+              <th>Class</th>
+              <th>Server</th>
+              <th>Guild</th>
+              <th>Union</th>
+              <th>Max Rank Date</th>
+            </tr>
+          </thead>
+          <tbody id="rankingBody">
+            <tr>
+              <td colspan="7" class="empty">Loading ranking data...</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
