@@ -1,4 +1,5 @@
 const validRegionCodes = new Set(["0", "2010", "3010", "4010"]);
+const validWeaponTypes = new Set(["11", "12", "13", "14", "15", "21", "22", "23", "31", "32", "33"]);
 const classMap = {
   13: "One-handed Sword",
   12: "Twin Sword",
@@ -16,46 +17,49 @@ const classMap = {
 module.exports = async function handler(req, res) {
   try {
     const regionCode = String(req.query.regionCode || "0");
+    const weaponType = String(req.query.weaponType || "");
+    const page = Number(req.query.page || "1");
+
     if (!validRegionCodes.has(regionCode)) {
       res.status(400).json({ error: "Invalid regionCode" });
       return;
     }
 
-    const items = [];
-    let baseDt = "";
-    let totalCount = 0;
-
-    for (let page = 1; page <= 10; page += 1) {
-      const pageData = await fetchRankingPage(regionCode, page);
-      const rankingData = pageData.props.pageProps.rankingListData;
-      baseDt = rankingData.additional?.baseDt || baseDt;
-      totalCount = rankingData.totalCount || totalCount;
-
-      for (const item of rankingData.items || []) {
-        items.push(transformRankingItem(item, page));
-      }
+    if (!Number.isInteger(page) || page < 1 || page > 10) {
+      res.status(400).json({ error: "Invalid page" });
+      return;
     }
+
+    if (weaponType && !validWeaponTypes.has(weaponType)) {
+      res.status(400).json({ error: "Invalid weaponType" });
+      return;
+    }
+
+    const pageData = await fetchRankingPage(regionCode, page, weaponType);
+    const rankingData = pageData.props.pageProps.rankingListData;
 
     res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=300");
     res.status(200).json({
-      source: `https://www.nightcrows.com/en/ranking/growth?regionCode=${regionCode}`,
+      source: `https://www.nightcrows.com/en/ranking/growth?regionCode=${regionCode}&weaponType=${weaponType}&page=${page}`,
       fetchedAt: new Date().toISOString(),
       regionCode,
-      baseDt,
-      total: items.length,
-      totalCount,
-      items,
+      page,
+      baseDt: rankingData.additional?.baseDt || "",
+      total: rankingData.items?.length || 0,
+      totalCount: rankingData.totalCount || 0,
+      items: (rankingData.items || []).map((item) => transformRankingItem(item, page)),
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-async function fetchRankingPage(regionCode, page) {
+async function fetchRankingPage(regionCode, page, weaponType = "") {
   const url = new URL("https://www.nightcrows.com/en/ranking/growth");
   url.searchParams.set("rankingType", "growth");
   url.searchParams.set("wmsso_sign", "check");
   url.searchParams.set("regionCode", regionCode);
+  if (weaponType) url.searchParams.set("weaponType", weaponType);
   url.searchParams.set("page", String(page));
 
   const response = await fetch(url);

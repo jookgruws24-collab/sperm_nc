@@ -61,7 +61,8 @@
         <table>
           <thead>
             <tr>
-              <th>Ranking</th>
+              <th>No.</th>
+              <th id="rankHeader">Ranking</th>
               <th>Character</th>
               <th>Class</th>
               <th>Server</th>
@@ -72,12 +73,31 @@
           </thead>
           <tbody id="rankingBody">
             <tr>
-              <td colspan="7" class="empty">Loading ranking data...</td>
+              <td colspan="8" class="empty">Loading ranking data...</td>
             </tr>
           </tbody>
         </table>
       </section>
+
+      <nav class="pagination" aria-label="Table pagination">
+        <button id="prevPage" type="button">Previous</button>
+        <span id="pageInfo">Page 1 of 1</span>
+        <button id="nextPage" type="button">Next</button>
+      </nav>
     </main>
+
+    <div id="loadingOverlay" class="loading-overlay" hidden>
+      <div class="loading-dialog" role="status" aria-live="polite" aria-label="Loading ranking data">
+        <div class="loading-head">
+          <span>Loading Data</span>
+          <strong id="loadingPercent">0%</strong>
+        </div>
+        <div class="loading-bar" aria-hidden="true">
+          <div id="loadingBarFill"></div>
+        </div>
+        <p id="loadingMessage">Preparing request...</p>
+      </div>
+    </div>
 
     <script src="app.js"></script>
   </body>

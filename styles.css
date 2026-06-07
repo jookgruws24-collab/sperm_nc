@@ -116,7 +116,7 @@ h1 {
 
 table {
   width: 100%;
-  min-width: 1060px;
+  min-width: 1160px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -145,6 +145,19 @@ td {
 
 tbody tr:hover {
   background: #f8f6f2;
+}
+
+.ranking-warning td {
+  border-block: 1px solid #d9bc75;
+  background: #fff6df;
+  color: #75571d;
+  font-size: 14px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.ranking-warning:hover {
+  background: #fff6df;
 }
 
 .rank-area {
@@ -212,6 +225,106 @@ tbody tr:hover {
 .empty {
   height: 140px;
   color: var(--muted);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.pagination button {
+  min-width: 96px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.pagination button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.pagination span {
+  min-width: 120px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(32, 29, 26, 0.38);
+  backdrop-filter: blur(2px);
+}
+
+.loading-overlay[hidden] {
+  display: none;
+}
+
+.loading-dialog {
+  width: min(420px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 22px;
+  background: var(--panel);
+  box-shadow: 0 22px 60px rgba(32, 29, 26, 0.22);
+}
+
+.loading-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.loading-head span {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.loading-head strong {
+  color: var(--accent-2);
+  font-size: 28px;
+  font-weight: 900;
+}
+
+.loading-bar {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8e2da;
+}
+
+.loading-bar div {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  transition: width 180ms ease;
+}
+
+.loading-dialog p {
+  min-height: 22px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 @media (max-width: 980px) {
