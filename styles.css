@@ -141,6 +141,42 @@ h1 {
   box-shadow: 0 0 0 3px rgba(40, 102, 110, 0.14);
 }
 
+.filter-actions {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+
+.filter-actions button {
+  flex: 1;
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.filter-actions button.primary {
+  border-color: var(--accent-2);
+  background: var(--accent-2);
+  color: #fff;
+}
+
+.filter-actions button:hover {
+  filter: brightness(0.97);
+}
+
+.compare-filters .filter-actions {
+  grid-column: 1 / -1;
+}
+
+.filters > .filter-actions {
+  grid-column: 1 / -1;
+}
+
 .compare-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -417,55 +453,46 @@ tbody tr:hover {
 }
 
 .loading-dialog {
-  width: min(420px, 100%);
+  display: grid;
+  justify-items: center;
+  width: min(360px, 100%);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 22px;
+  padding: 28px 24px;
   background: var(--panel);
   box-shadow: 0 22px 60px rgba(32, 29, 26, 0.22);
+  text-align: center;
 }
 
-.loading-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
-}
-
-.loading-head span {
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.loading-head strong {
+.loading-dialog strong {
   color: var(--accent-2);
-  font-size: 28px;
+  font-size: 20px;
   font-weight: 900;
+  line-height: 1.2;
 }
 
-.loading-bar {
-  height: 10px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #e8e2da;
-}
-
-.loading-bar div {
-  width: 0%;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--accent-2), var(--accent));
-  transition: width 180ms ease;
+.loading-spinner {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 16px;
+  border: 4px solid #e8e2da;
+  border-top-color: var(--accent-2);
+  border-radius: 50%;
+  animation: loading-spin 800ms linear infinite;
 }
 
 .loading-dialog p {
   min-height: 22px;
-  margin: 12px 0 0;
+  margin: 10px 0 0;
   color: var(--muted);
   font-size: 14px;
+  line-height: 1.45;
+}
+
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 980px) {

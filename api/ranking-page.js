@@ -55,7 +55,7 @@ module.exports = async function handler(req, res) {
       baseDt: rankingData.additional?.baseDt || "",
       total: rankingData.items?.length || 0,
       totalCount: rankingData.totalCount || 0,
-      items: (rankingData.items || []).map((item) => transformRankingItem(item, page)),
+      items: (rankingData.items || []).map((item) => transformRankingItem(item, page, rankingData.totalCount)),
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -84,7 +84,7 @@ async function fetchRankingPage(rankingType, regionCode, page, weaponType = "") 
   return JSON.parse(match[1]);
 }
 
-function transformRankingItem(item, sourcePage) {
+function transformRankingItem(item, sourcePage, sourceTotalCount) {
   const delta = item.deltaRank;
   const fluctuationType = delta === null ? "new" : delta > 0 ? "up" : delta < 0 ? "down" : "same";
   const fluctuation = delta === null ? "NEW" : delta === 0 ? "-" : String(Math.abs(delta));
@@ -103,6 +103,7 @@ function transformRankingItem(item, sourcePage) {
     region: item.RegionName || "",
     regionCode: item.RegionID || "",
     sourcePage,
+    sourceTotalCount: Number(sourceTotalCount) || 0,
     maxRankDate: item.MaxRankDate || "",
   };
 }

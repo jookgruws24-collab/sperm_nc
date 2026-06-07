@@ -1,44 +1,50 @@
-import { maxConcurrentLoads, totalPages, weaponTypeOrder, weaponTypes } from "./config.js";
+import { weaponTypeOrder, weaponTypes } from "./config.js";
 
-export async function loadPagesWithLimit(rankingType, regionCode, onProgress) {
-  const globalTasks = Array.from({ length: totalPages }, (_, index) => ({
-    page: index + 1,
-    weaponType: null,
-    scope: "global",
-  }));
-  const classTasks = weaponTypes.flatMap((weaponType) =>
-    Array.from({ length: totalPages }, (_, index) => ({
-      page: index + 1,
-      weaponType,
-      scope: "class",
-    }))
+export async function loadCompleteRankingData(rankingType, regionCode, onProgress) {
+  const data = await fetchRankingBatch(
+    rankingType,
+    regionCode,
+    weaponTypes.map((weaponType) => weaponType.code),
+    { includeGlobal: true }
   );
-  const tasks = [...globalTasks, ...classTasks];
-  const results = new Array(tasks.length);
-  let nextIndex = 0;
-  let loadedTasks = 0;
-  let loadedRows = 0;
+  const items = (Array.isArray(data.items) ? data.items : []).map((row) =>
+    annotateRankScope(row, row.sourceScope || "class", row.sourceTotalCount || data.totalCount)
+  );
+  onProgress?.(1, items.length);
+  return items;
+}
 
-  async function worker() {
-    while (nextIndex < tasks.length) {
-      const taskIndex = nextIndex;
-      const task = tasks[taskIndex];
-      nextIndex += 1;
+export async function loadGlobalPages(rankingType, regionCode, onProgress) {
+  const data = await fetchRankingBatch(rankingType, regionCode);
+  const items = (Array.isArray(data.items) ? data.items : []).map((row) =>
+    annotateRankScope(row, "global", data.totalCount)
+  );
+  onProgress?.(1, items.length);
+  return items;
+}
 
-      const data = await fetchRankingPage(rankingType, regionCode, task.page, task.weaponType?.code);
-      const items = (Array.isArray(data.items) ? data.items : []).map((row) =>
-        annotateRankScope(row, task.scope, data.totalCount)
-      );
-      results[taskIndex] = items;
-      loadedTasks += 1;
-      loadedRows += items.length;
-      onProgress(loadedTasks, loadedRows);
-    }
-  }
+export async function loadWeaponTypePages(rankingType, regionCode, weaponTypeCode, onProgress) {
+  const weaponType = weaponTypes.find((item) => item.code === String(weaponTypeCode));
+  if (!weaponType) return [];
 
-  const workerCount = Math.min(maxConcurrentLoads, tasks.length);
-  await Promise.all(Array.from({ length: workerCount }, worker));
-  return results.flat();
+  const data = await fetchRankingBatch(rankingType, regionCode, [weaponType.code]);
+  const items = (Array.isArray(data.items) ? data.items : []).map((row) =>
+    annotateRankScope(row, "class", row.sourceTotalCount || data.totalCount)
+  );
+  onProgress?.(1, items.length);
+  return items;
+}
+
+export async function loadAllWeaponTypePages(rankingType, regionCode, onProgress, weaponTypeCodes) {
+  const selectedWeaponTypeCodes = weaponTypeCodes?.length
+    ? weaponTypeCodes
+    : weaponTypes.map((weaponType) => weaponType.code);
+  const data = await fetchRankingBatch(rankingType, regionCode, selectedWeaponTypeCodes);
+  const items = (Array.isArray(data.items) ? data.items : []).map((row) =>
+    annotateRankScope(row, "class", row.sourceTotalCount || data.totalCount)
+  );
+  onProgress?.(1, items.length);
+  return items;
 }
 
 export async function fetchRankingPage(rankingType, regionCode, page, weaponType) {
@@ -50,8 +56,31 @@ export async function fetchRankingPage(rankingType, regionCode, page, weaponType
   return response.json();
 }
 
-export function totalLoadTasks() {
-  return (weaponTypes.length + 1) * totalPages;
+export async function fetchRankingBatch(rankingType, regionCode, weaponTypeCodes, options = {}) {
+  const params = new URLSearchParams({ rankingType, regionCode });
+  if (weaponTypeCodes?.length === 1) params.set("weaponType", weaponTypeCodes[0]);
+  if (weaponTypeCodes?.length > 1) params.set("weaponTypes", weaponTypeCodes.join(","));
+  if (options.includeGlobal) params.set("includeGlobal", "1");
+  const response = await fetch(`/api/ranking?${params.toString()}`, { cache: "no-store" });
+
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+export function globalLoadTasks() {
+  return 1;
+}
+
+export function weaponTypeLoadTasks() {
+  return 1;
+}
+
+export function allWeaponTypeLoadTasks() {
+  return 1;
+}
+
+export function completeLoadTasks() {
+  return 1;
 }
 
 export function mergeRankingRows(rows) {
@@ -120,7 +149,12 @@ export function getTopRankingRows(rows) {
 }
 
 export function calculateTopRankingPower(rows) {
-  return rows.reduce((power, row) => power + (1001 - row.globalRanking) / 1000, 0);
+  return rows.reduce((power, row) => power + getTopRankingBracketScore(row.globalRanking), 0);
+}
+
+export function getTopRankingBracketScore(ranking) {
+  if (!Number.isFinite(ranking) || ranking < 1 || ranking > 1000) return 0;
+  return 101 - Math.ceil(ranking / 10);
 }
 
 function annotateRankScope(row, scope, totalCount) {

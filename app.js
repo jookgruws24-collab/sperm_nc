@@ -6,15 +6,15 @@ import {
 } from "./js/config.js";
 import {
   calculateTopRankingPower,
+  completeLoadTasks,
   getClassRankingWarningIndexFor,
   getFlucTypeForClass,
   getFlucValueForClass,
   getRankValueForClass,
   getTopRankingRows,
-  loadPagesWithLimit,
+  loadCompleteRankingData,
   mergeRankingRows,
   sortRowsForViewWithClass,
-  totalLoadTasks,
 } from "./js/ranking-data.js";
 import { capitalize, escapeHtml, formatDate, normalize } from "./js/utils.js";
 
@@ -38,6 +38,8 @@ const compareScreen = document.querySelector("#compareScreen");
 const rankingViewBtn = document.querySelector("#rankingViewBtn");
 const compareViewBtn = document.querySelector("#compareViewBtn");
 const regionSelect = document.querySelector("#regionSelect");
+const searchFiltersBtn = document.querySelector("#searchFiltersBtn");
+const clearFiltersBtn = document.querySelector("#clearFiltersBtn");
 const prevPage = document.querySelector("#prevPage");
 const nextPage = document.querySelector("#nextPage");
 const pageInfo = document.querySelector("#pageInfo");
@@ -47,8 +49,6 @@ const leftWinBar = document.querySelector("#leftWinBar");
 const rightWinBar = document.querySelector("#rightWinBar");
 const winRateSummary = document.querySelector("#winRateSummary");
 const loadingOverlay = document.querySelector("#loadingOverlay");
-const loadingPercent = document.querySelector("#loadingPercent");
-const loadingBarFill = document.querySelector("#loadingBarFill");
 const loadingMessage = document.querySelector("#loadingMessage");
 const filterInputs = Object.fromEntries(
   fields.map((field) => [field, document.querySelector(`#filter-${field}`)])
@@ -62,6 +62,26 @@ const compareState = {
   left: createCompareSideState(),
   right: createCompareSideState(),
 };
+
+function createRegionCacheEntry() {
+  return {
+    rows: [],
+    loadedGlobal: false,
+    loadedWeaponTypes: new Set(),
+    loadingComplete: null,
+  };
+}
+
+function getRegionCacheEntry(rankingType, regionCode) {
+  const key = getCacheKey(rankingType, regionCode);
+  if (!regionCache.has(key)) regionCache.set(key, createRegionCacheEntry());
+  return regionCache.get(key);
+}
+
+function mergeRowsIntoCache(cacheEntry, rows) {
+  cacheEntry.rows = mergeRankingRows([...cacheEntry.rows, ...rows]);
+  return cacheEntry.rows;
+}
 
 function createCompareSideState() {
   return {
@@ -160,19 +180,15 @@ function renderPagination(pageCount) {
 function renderClassOptions() {
   const classSelect = filterInputs.class;
   const current = state.filters.class;
-  const availableClasses = new Set(state.rows.map((row) => row.class).filter(Boolean));
-  const classes = weaponTypes.map((weaponType) => weaponType.name).filter((className) => availableClasses.has(className));
+  const classes = weaponTypes.map((weaponType) => weaponType.name);
 
   classSelect.innerHTML = [
     '<option value="">All</option>',
     ...classes.map((className) => `<option value="${escapeHtml(className)}">${escapeHtml(className)}</option>`),
   ].join("");
 
-  if (classes.includes(current)) {
-    classSelect.value = current;
-  } else {
-    state.filters.class = "";
-  }
+  classSelect.value = classes.includes(current) ? current : "";
+  if (!classes.includes(current)) state.filters.class = "";
 }
 
 function bindFilters() {
@@ -182,19 +198,13 @@ function bindFilters() {
   compareViewBtn.addEventListener("click", () => switchView("compare"));
 
   for (const field of fields) {
-    const eventName = filterInputs[field].tagName === "SELECT" ? "change" : "input";
-    filterInputs[field].addEventListener(eventName, (event) => {
-      state.filters[field] = field === "class" ? event.target.value : normalize(event.target.value);
-      state.currentPage = 1;
-      render();
+    filterInputs[field].addEventListener("keydown", (event) => {
+      if (event.key === "Enter") applyRankingFilters();
     });
   }
 
-  regionSelect.addEventListener("change", () => {
-    state.regionCode = regionSelect.value;
-    state.currentPage = 1;
-    loadData();
-  });
+  searchFiltersBtn.addEventListener("click", applyRankingFilters);
+  clearFiltersBtn.addEventListener("click", clearRankingFilters);
 
   prevPage.addEventListener("click", () => {
     state.currentPage -= 1;
@@ -213,21 +223,73 @@ function bindCompareFilters() {
   for (const panel of document.querySelectorAll(".compare-panel")) {
     const side = panel.dataset.side;
     for (const control of panel.querySelectorAll("[data-compare-field]")) {
-      const field = control.dataset.compareField;
-      const eventName = control.tagName === "SELECT" ? "change" : "input";
-
-      control.addEventListener(eventName, () => {
-        if (field === "regionCode") {
-          compareState[side].regionCode = control.value;
-          loadCompareSide(side);
-          return;
-        }
-
-        compareState[side].filters[field] = normalize(control.value);
-        renderCompareSide(side);
+      control.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") applyCompareFilters(side);
       });
     }
+
+    panel.querySelector('[data-compare-action="search"]').addEventListener("click", () => applyCompareFilters(side));
+    panel.querySelector('[data-compare-action="clear"]').addEventListener("click", () => clearCompareFilters(side));
   }
+}
+
+function applyRankingFilters() {
+  const nextRegionCode = regionSelect.value;
+  const regionChanged = state.regionCode !== nextRegionCode;
+
+  state.regionCode = nextRegionCode;
+  state.filters = readRankingFilters();
+  state.currentPage = 1;
+
+  if (regionChanged) {
+    loadData();
+  } else {
+    render();
+  }
+}
+
+function clearRankingFilters() {
+  regionSelect.value = "0";
+  for (const field of fields) filterInputs[field].value = "";
+  applyRankingFilters();
+}
+
+function readRankingFilters() {
+  return Object.fromEntries(
+    fields.map((field) => [field, field === "class" ? filterInputs[field].value : normalize(filterInputs[field].value)])
+  );
+}
+
+function applyCompareFilters(side) {
+  const panel = document.querySelector(`.compare-panel[data-side="${side}"]`);
+  const sideState = compareState[side];
+  const nextRegionCode = panel.querySelector('[data-compare-field="regionCode"]').value;
+  const regionChanged = sideState.regionCode !== nextRegionCode;
+
+  sideState.regionCode = nextRegionCode;
+  sideState.filters = readCompareFilters(panel);
+
+  if (regionChanged) {
+    loadCompareSide(side);
+  } else {
+    renderCompareSide(side);
+  }
+}
+
+function clearCompareFilters(side) {
+  const panel = document.querySelector(`.compare-panel[data-side="${side}"]`);
+  for (const control of panel.querySelectorAll("[data-compare-field]")) {
+    control.value = control.dataset.compareField === "regionCode" ? "0" : "";
+  }
+  applyCompareFilters(side);
+}
+
+function readCompareFilters(panel) {
+  return {
+    server: normalize(panel.querySelector('[data-compare-field="server"]').value),
+    guild: normalize(panel.querySelector('[data-compare-field="guild"]').value),
+    union: normalize(panel.querySelector('[data-compare-field="union"]').value),
+  };
 }
 
 function switchView(view) {
@@ -260,11 +322,8 @@ function switchRankingType(rankingType) {
   }
 }
 
-function setLoading(percent, message) {
-  const value = Math.max(0, Math.min(100, Math.round(percent)));
+function setLoading(_percent, message) {
   loadingOverlay.hidden = false;
-  loadingPercent.textContent = `${value}%`;
-  loadingBarFill.style.width = `${value}%`;
   loadingMessage.textContent = message;
 }
 
@@ -274,32 +333,45 @@ function hideLoading() {
 
 async function loadData() {
   const loadId = (activeLoadId += 1);
-  const cachedRows = regionCache.get(getCacheKey(state.rankingType, state.regionCode));
+  const cacheEntry = getRegionCacheEntry(state.rankingType, state.regionCode);
 
-  if (cachedRows) {
-    state.rows = cachedRows;
+  if (isCompleteCache(cacheEntry)) {
+    state.rows = cacheEntry.rows;
     renderClassOptions();
     render();
-    setLoading(0, "Refreshing cached data...");
-  } else {
-    body.innerHTML = '<tr><td colspan="8" class="empty">Loading ranking data...</td></tr>';
-    visibleCount.textContent = "0";
-    setLoading(0, "Preparing request...");
+    return;
   }
 
+  if (cacheEntry.loadingComplete) {
+    body.innerHTML = '<tr><td colspan="8" class="empty">Loading ranking data...</td></tr>';
+    visibleCount.textContent = "0";
+    await cacheEntry.loadingComplete;
+    if (loadId !== activeLoadId) return;
+    state.rows = cacheEntry.rows;
+    renderClassOptions();
+    render();
+    return;
+  }
+
+  body.innerHTML = '<tr><td colspan="8" class="empty">Loading ranking data...</td></tr>';
+  visibleCount.textContent = "0";
+  setLoading(0, "Loading full ranking dataset...");
+
   try {
-    const rows = await loadPagesWithLimit(state.rankingType, state.regionCode, (loadedPages, loadedRows) => {
+    cacheEntry.loadingComplete = loadCompleteRankingData(state.rankingType, state.regionCode, (loadedRequests, loadedRows) => {
       if (loadId !== activeLoadId) return;
       setLoading(
-        (loadedPages / totalLoadTasks()) * 100,
-        `Loaded ${loadedPages} of ${totalLoadTasks()} requests (${loadedRows.toLocaleString()} rows)...`
+        (loadedRequests / completeLoadTasks()) * 100,
+        `Loaded full dataset in ${loadedRequests} request (${loadedRows.toLocaleString()} rows)...`
       );
     });
+    const rows = await cacheEntry.loadingComplete;
 
     if (loadId !== activeLoadId) return;
-    const mergedRows = mergeRankingRows(rows);
-    regionCache.set(getCacheKey(state.rankingType, state.regionCode), mergedRows);
-    state.rows = mergedRows;
+    mergeRowsIntoCache(cacheEntry, rows);
+    cacheEntry.loadedGlobal = true;
+    markAllWeaponTypesLoaded(cacheEntry);
+    state.rows = cacheEntry.rows;
     state.currentPage = 1;
     renderClassOptions();
     render();
@@ -317,36 +389,49 @@ async function loadData() {
       </tr>
     `;
     console.error(error);
+  } finally {
+    cacheEntry.loadingComplete = null;
   }
 }
 
 async function loadCompareSide(side) {
   const loadId = (activeCompareLoadIds[side] += 1);
   const sideState = compareState[side];
-  const cachedRows = regionCache.get(getCacheKey(state.rankingType, sideState.regionCode));
+  const cacheEntry = getRegionCacheEntry(state.rankingType, sideState.regionCode);
 
-  if (cachedRows) {
-    sideState.rows = cachedRows;
+  if (isCompleteCache(cacheEntry)) {
+    sideState.rows = cacheEntry.rows;
+    renderCompareSide(side);
+    return;
+  }
+
+  if (cacheEntry.loadingComplete) {
+    renderCompareLoading(side);
+    await cacheEntry.loadingComplete;
+    if (loadId !== activeCompareLoadIds[side]) return;
+    sideState.rows = cacheEntry.rows;
     renderCompareSide(side);
     return;
   }
 
   renderCompareLoading(side);
-  setLoading(0, `Loading ${getCompareTitle(side)}...`);
+  setLoading(0, `Loading ${getCompareTitle(side)} full ranking dataset...`);
 
   try {
-    const rows = await loadPagesWithLimit(state.rankingType, sideState.regionCode, (loadedPages, loadedRows) => {
+    cacheEntry.loadingComplete = loadCompleteRankingData(state.rankingType, sideState.regionCode, (loadedRequests, loadedRows) => {
       if (loadId !== activeCompareLoadIds[side]) return;
       setLoading(
-        (loadedPages / totalLoadTasks()) * 100,
-        `${getCompareTitle(side)}: loaded ${loadedPages} of ${totalLoadTasks()} requests (${loadedRows.toLocaleString()} rows)...`
+        (loadedRequests / completeLoadTasks()) * 100,
+        `${getCompareTitle(side)}: loaded full dataset in ${loadedRequests} request (${loadedRows.toLocaleString()} rows)...`
       );
     });
+    const rows = await cacheEntry.loadingComplete;
 
     if (loadId !== activeCompareLoadIds[side]) return;
-    const mergedRows = mergeRankingRows(rows);
-    regionCache.set(getCacheKey(state.rankingType, sideState.regionCode), mergedRows);
-    sideState.rows = mergedRows;
+    mergeRowsIntoCache(cacheEntry, rows);
+    cacheEntry.loadedGlobal = true;
+    markAllWeaponTypesLoaded(cacheEntry);
+    sideState.rows = cacheEntry.rows;
     renderCompareSide(side);
     setLoading(100, "Done");
     window.setTimeout(() => {
@@ -356,6 +441,8 @@ async function loadCompareSide(side) {
     hideLoading();
     renderCompareError(side);
     console.error(error);
+  } finally {
+    cacheEntry.loadingComplete = null;
   }
 }
 
@@ -371,8 +458,8 @@ function renderCompareSide(side) {
   countElement.textContent = `${rows.length.toLocaleString()} rows`;
   metaElement.textContent =
     rows.length > compareRowsPerTable
-      ? `Showing first ${compareRowsPerTable.toLocaleString()} rows. Win rate uses ${getTopRankingRows(rows).length.toLocaleString()} official top 1,000 rows.`
-      : `Win rate uses ${getTopRankingRows(rows).length.toLocaleString()} official top 1,000 rows.`;
+      ? `Showing first ${compareRowsPerTable.toLocaleString()} rows. Win rate scores ${getTopRankingRows(rows).length.toLocaleString()} official top 1,000 rows.`
+      : `Win rate scores ${getTopRankingRows(rows).length.toLocaleString()} official top 1,000 rows.`;
 
   if (!pageRows.length) {
     bodyElement.innerHTML = '<tr><td colspan="4" class="empty">No matching data</td></tr>';
@@ -452,12 +539,20 @@ function renderWinRate() {
   rightWinRate.textContent = `${Math.round(rightRate)}%`;
   leftWinBar.style.width = `${leftRate}%`;
   rightWinBar.style.width = `${rightRate}%`;
-  winRateSummary.textContent = `Calculated from official top 1,000 rows only: TEAM A ${leftRows.length.toLocaleString()} rows, TEAM B ${rightRows.length.toLocaleString()} rows.`;
+  winRateSummary.textContent = `Calculated from official top 1,000 rows only with 10-rank brackets: 1-10 = 100 pts, 11-20 = 99 pts, ... 991-1000 = 1 pt. TEAM A ${leftRows.length.toLocaleString()} rows, TEAM B ${rightRows.length.toLocaleString()} rows.`;
 }
 
 function getCompareRowsForWinRate(side) {
   const sideState = compareState[side];
   return getTopRankingRows(sideState.rows.filter((row) => matchesCompareFilters(row, sideState)));
+}
+
+function isCompleteCache(cacheEntry) {
+  return cacheEntry.loadedGlobal && cacheEntry.loadedWeaponTypes.size >= weaponTypes.length;
+}
+
+function markAllWeaponTypesLoaded(cacheEntry) {
+  for (const weaponType of weaponTypes) cacheEntry.loadedWeaponTypes.add(weaponType.code);
 }
 
 function getCacheKey(rankingType, regionCode) {
