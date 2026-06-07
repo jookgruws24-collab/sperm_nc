@@ -1,35 +1,51 @@
+import {
+  compareRowsPerTable,
+  rankingTypes,
+  rowsPerPage,
+  weaponTypes,
+} from "./js/config.js";
+import {
+  calculateTopRankingPower,
+  getClassRankingWarningIndexFor,
+  getFlucTypeForClass,
+  getFlucValueForClass,
+  getRankValueForClass,
+  getTopRankingRows,
+  loadPagesWithLimit,
+  mergeRankingRows,
+  sortRowsForViewWithClass,
+  totalLoadTasks,
+} from "./js/ranking-data.js";
+import { capitalize, escapeHtml, formatDate, normalize } from "./js/utils.js";
+
 const fields = ["ranking", "character", "class", "server", "guild", "union"];
 const state = {
+  rankingType: "growth",
   rows: [],
   filters: Object.fromEntries(fields.map((field) => [field, ""])),
   regionCode: "0",
   currentPage: 1,
 };
 const regionCache = new Map();
-const totalPages = 10;
-const maxConcurrentLoads = 4;
-const rowsPerPage = 1000;
-const weaponTypes = [
-  { code: "13", name: "One-handed Sword" },
-  { code: "12", name: "Twin Sword" },
-  { code: "31", name: "Staff" },
-  { code: "32", name: "Wand" },
-  { code: "33", name: "Orb" },
-  { code: "11", name: "Two-handed Sword" },
-  { code: "14", name: "Spear" },
-  { code: "21", name: "Bow" },
-  { code: "22", name: "Dagger" },
-  { code: "23", name: "Rapier" },
-  { code: "15", name: "Cannon" },
-];
-const weaponTypeOrder = new Map(weaponTypes.map((weaponType, index) => [Number(weaponType.code), index]));
 
 const body = document.querySelector("#rankingBody");
 const visibleCount = document.querySelector("#visibleCount");
+const pageTitle = document.querySelector("#pageTitle");
+const growthTypeBtn = document.querySelector("#growthTypeBtn");
+const levelTypeBtn = document.querySelector("#levelTypeBtn");
+const rankingScreen = document.querySelector("#rankingScreen");
+const compareScreen = document.querySelector("#compareScreen");
+const rankingViewBtn = document.querySelector("#rankingViewBtn");
+const compareViewBtn = document.querySelector("#compareViewBtn");
 const regionSelect = document.querySelector("#regionSelect");
 const prevPage = document.querySelector("#prevPage");
 const nextPage = document.querySelector("#nextPage");
 const pageInfo = document.querySelector("#pageInfo");
+const leftWinRate = document.querySelector("#leftWinRate");
+const rightWinRate = document.querySelector("#rightWinRate");
+const leftWinBar = document.querySelector("#leftWinBar");
+const rightWinBar = document.querySelector("#rightWinBar");
+const winRateSummary = document.querySelector("#winRateSummary");
 const loadingOverlay = document.querySelector("#loadingOverlay");
 const loadingPercent = document.querySelector("#loadingPercent");
 const loadingBarFill = document.querySelector("#loadingBarFill");
@@ -38,14 +54,34 @@ const filterInputs = Object.fromEntries(
   fields.map((field) => [field, document.querySelector(`#filter-${field}`)])
 );
 let activeLoadId = 0;
+const activeCompareLoadIds = {
+  left: 0,
+  right: 0,
+};
+const compareState = {
+  left: createCompareSideState(),
+  right: createCompareSideState(),
+};
 
-function normalize(value) {
-  return String(value ?? "").trim().toLocaleLowerCase();
+function createCompareSideState() {
+  return {
+    regionCode: "0",
+    rows: [],
+    filters: {
+      server: "",
+      guild: "",
+      union: "",
+    },
+  };
 }
 
 function flucLabel(row) {
-  const type = getFlucType(row);
-  const value = getFlucValue(row);
+  return flucLabelForClass(row, state.filters.class);
+}
+
+function flucLabelForClass(row, classFilter) {
+  const type = getFlucTypeForClass(row, classFilter);
+  const value = getFlucValueForClass(row, classFilter);
   if (type === "up") return `▲ ${value}`;
   if (type === "down") return `▼ ${value}`;
   return value || "-";
@@ -139,28 +175,12 @@ function renderClassOptions() {
   }
 }
 
-function formatDate(value) {
-  if (!value) return "";
-  const text = String(value);
-  const isoMatch = text.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
-  if (isoMatch) return `${isoMatch[1]} ${isoMatch[2]}`;
-
-  const usMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}:\d{2}:\d{2})$/);
-  if (usMatch) return `${usMatch[3]}-${usMatch[1]}-${usMatch[2]} ${usMatch[4]}`;
-
-  return text;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
 function bindFilters() {
+  growthTypeBtn.addEventListener("click", () => switchRankingType("growth"));
+  levelTypeBtn.addEventListener("click", () => switchRankingType("level"));
+  rankingViewBtn.addEventListener("click", () => switchView("ranking"));
+  compareViewBtn.addEventListener("click", () => switchView("compare"));
+
   for (const field of fields) {
     const eventName = filterInputs[field].tagName === "SELECT" ? "change" : "input";
     filterInputs[field].addEventListener(eventName, (event) => {
@@ -185,6 +205,59 @@ function bindFilters() {
     state.currentPage += 1;
     render();
   });
+
+  bindCompareFilters();
+}
+
+function bindCompareFilters() {
+  for (const panel of document.querySelectorAll(".compare-panel")) {
+    const side = panel.dataset.side;
+    for (const control of panel.querySelectorAll("[data-compare-field]")) {
+      const field = control.dataset.compareField;
+      const eventName = control.tagName === "SELECT" ? "change" : "input";
+
+      control.addEventListener(eventName, () => {
+        if (field === "regionCode") {
+          compareState[side].regionCode = control.value;
+          loadCompareSide(side);
+          return;
+        }
+
+        compareState[side].filters[field] = normalize(control.value);
+        renderCompareSide(side);
+      });
+    }
+  }
+}
+
+function switchView(view) {
+  const isCompare = view === "compare";
+  rankingScreen.hidden = isCompare;
+  compareScreen.hidden = !isCompare;
+  rankingViewBtn.classList.toggle("active", !isCompare);
+  compareViewBtn.classList.toggle("active", isCompare);
+
+  if (isCompare) {
+    loadCompareSide("left");
+    loadCompareSide("right");
+  }
+}
+
+function switchRankingType(rankingType) {
+  if (state.rankingType === rankingType) return;
+
+  state.rankingType = rankingType;
+  state.currentPage = 1;
+  pageTitle.textContent = rankingTypes[rankingType];
+  growthTypeBtn.classList.toggle("active", rankingType === "growth");
+  levelTypeBtn.classList.toggle("active", rankingType === "level");
+
+  if (compareScreen.hidden) {
+    loadData();
+  } else {
+    loadCompareSide("left");
+    loadCompareSide("right");
+  }
 }
 
 function setLoading(percent, message) {
@@ -201,7 +274,7 @@ function hideLoading() {
 
 async function loadData() {
   const loadId = (activeLoadId += 1);
-  const cachedRows = regionCache.get(state.regionCode);
+  const cachedRows = regionCache.get(getCacheKey(state.rankingType, state.regionCode));
 
   if (cachedRows) {
     state.rows = cachedRows;
@@ -215,7 +288,7 @@ async function loadData() {
   }
 
   try {
-    const rows = await loadPagesWithLimit(state.regionCode, (loadedPages, loadedRows) => {
+    const rows = await loadPagesWithLimit(state.rankingType, state.regionCode, (loadedPages, loadedRows) => {
       if (loadId !== activeLoadId) return;
       setLoading(
         (loadedPages / totalLoadTasks()) * 100,
@@ -225,7 +298,7 @@ async function loadData() {
 
     if (loadId !== activeLoadId) return;
     const mergedRows = mergeRankingRows(rows);
-    regionCache.set(state.regionCode, mergedRows);
+    regionCache.set(getCacheKey(state.rankingType, state.regionCode), mergedRows);
     state.rows = mergedRows;
     state.currentPage = 1;
     renderClassOptions();
@@ -247,163 +320,168 @@ async function loadData() {
   }
 }
 
-async function loadPagesWithLimit(regionCode, onProgress) {
-  const globalTasks = Array.from({ length: totalPages }, (_, index) => ({
-    page: index + 1,
-    weaponType: null,
-    scope: "global",
-  }));
-  const classTasks = weaponTypes.flatMap((weaponType) =>
-    Array.from({ length: totalPages }, (_, index) => ({
-      page: index + 1,
-      weaponType,
-      scope: "class",
-    }))
-  );
-  const tasks = [...globalTasks, ...classTasks];
-  const results = new Array(tasks.length);
-  let nextIndex = 0;
-  let loadedTasks = 0;
-  let loadedRows = 0;
+async function loadCompareSide(side) {
+  const loadId = (activeCompareLoadIds[side] += 1);
+  const sideState = compareState[side];
+  const cachedRows = regionCache.get(getCacheKey(state.rankingType, sideState.regionCode));
 
-  async function worker() {
-    while (nextIndex < tasks.length) {
-      const taskIndex = nextIndex;
-      const task = tasks[taskIndex];
-      nextIndex += 1;
+  if (cachedRows) {
+    sideState.rows = cachedRows;
+    renderCompareSide(side);
+    return;
+  }
 
-      const data = await fetchRankingPage(regionCode, task.page, task.weaponType?.code);
-      const items = (Array.isArray(data.items) ? data.items : []).map((row) =>
-        annotateRankScope(row, task.scope, data.totalCount)
+  renderCompareLoading(side);
+  setLoading(0, `Loading ${getCompareTitle(side)}...`);
+
+  try {
+    const rows = await loadPagesWithLimit(state.rankingType, sideState.regionCode, (loadedPages, loadedRows) => {
+      if (loadId !== activeCompareLoadIds[side]) return;
+      setLoading(
+        (loadedPages / totalLoadTasks()) * 100,
+        `${getCompareTitle(side)}: loaded ${loadedPages} of ${totalLoadTasks()} requests (${loadedRows.toLocaleString()} rows)...`
       );
-      results[taskIndex] = items;
-      loadedTasks += 1;
-      loadedRows += items.length;
-      onProgress(loadedTasks, loadedRows);
-    }
+    });
+
+    if (loadId !== activeCompareLoadIds[side]) return;
+    const mergedRows = mergeRankingRows(rows);
+    regionCache.set(getCacheKey(state.rankingType, sideState.regionCode), mergedRows);
+    sideState.rows = mergedRows;
+    renderCompareSide(side);
+    setLoading(100, "Done");
+    window.setTimeout(() => {
+      if (loadId === activeCompareLoadIds[side]) hideLoading();
+    }, 250);
+  } catch (error) {
+    hideLoading();
+    renderCompareError(side);
+    console.error(error);
+  }
+}
+
+function renderCompareSide(side) {
+  const sideState = compareState[side];
+  const bodyElement = document.querySelector(`#compare${capitalize(side)}Body`);
+  const countElement = document.querySelector(`#compare${capitalize(side)}Count`);
+  const metaElement = document.querySelector(`#compare${capitalize(side)}Meta`);
+  const rows = sortRowsForViewWithClass(sideState.rows.filter((row) => matchesCompareFilters(row, sideState)), "");
+  const warningIndex = getClassRankingWarningIndexFor(rows, "");
+  const pageRows = rows.slice(0, compareRowsPerTable);
+
+  countElement.textContent = `${rows.length.toLocaleString()} rows`;
+  metaElement.textContent =
+    rows.length > compareRowsPerTable
+      ? `Showing first ${compareRowsPerTable.toLocaleString()} rows. Win rate uses ${getTopRankingRows(rows).length.toLocaleString()} official top 1,000 rows.`
+      : `Win rate uses ${getTopRankingRows(rows).length.toLocaleString()} official top 1,000 rows.`;
+
+  if (!pageRows.length) {
+    bodyElement.innerHTML = '<tr><td colspan="4" class="empty">No matching data</td></tr>';
+    renderWinRate();
+    return;
   }
 
-  const workerCount = Math.min(maxConcurrentLoads, tasks.length);
-  await Promise.all(Array.from({ length: workerCount }, worker));
-  return results.flat();
+  bodyElement.innerHTML = pageRows
+    .map((row, index) => {
+      const warningRow =
+        index === warningIndex
+          ? `
+            <tr class="ranking-warning">
+              <td colspan="4">
+                From No. ${(warningIndex + 1).toLocaleString()} onward, rows use normalized class ranking.
+              </td>
+            </tr>
+          `
+          : "";
+
+      return `
+        ${warningRow}
+        <tr>
+          <td>${(index + 1).toLocaleString()}</td>
+          <td>
+            <div class="rank-area">
+              <div class="rank" data-rank="${getRankValueForClass(row, "")}">
+                <div class="value">${getRankValueForClass(row, "")}</div>
+              </div>
+              <div class="fluc ${getFlucTypeForClass(row, "")}">${flucLabelForClass(row, "")}</div>
+            </div>
+          </td>
+          <td>${escapeHtml(row.character)}</td>
+          <td>${escapeHtml(row.class)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+  renderWinRate();
 }
 
-async function fetchRankingPage(regionCode, page, weaponType) {
-  const params = new URLSearchParams({ regionCode, page: String(page) });
-  if (weaponType) params.set("weaponType", weaponType);
-  const response = await fetch(`/api/ranking-page?${params.toString()}`, { cache: "no-store" });
-
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
-}
-
-function totalLoadTasks() {
-  return (weaponTypes.length + 1) * totalPages;
-}
-
-function mergeRankingRows(rows) {
-  const seen = new Map();
-
-  for (const row of rows) {
-    const key = [row.regionCode, row.server, row.character, row.classCode].join("|");
-    if (!seen.has(key)) {
-      seen.set(key, row);
-    } else {
-      const existing = seen.get(key);
-      seen.set(key, { ...existing, ...compactRankFields(row) });
-    }
-  }
-
-  return Array.from(seen.values()).sort((a, b) => {
-    const classOrder = (weaponTypeOrder.get(a.classCode) ?? 999) - (weaponTypeOrder.get(b.classCode) ?? 999);
-    if (classOrder) return classOrder;
-    return (a.classRanking ?? a.ranking) - (b.classRanking ?? b.ranking);
+function matchesCompareFilters(row, sideState) {
+  return ["server", "guild", "union"].every((field) => {
+    const query = sideState.filters[field];
+    return !query || normalize(row[field]).includes(query);
   });
 }
 
-function annotateRankScope(row, scope, totalCount) {
-  if (scope === "global") {
-    return {
-      ...row,
-      globalRanking: row.ranking,
-      globalFluctuationType: row.fluctuationType,
-      globalFluctuation: row.fluctuation,
-    };
-  }
-
-  return {
-    ...row,
-    classTotalCount: Number(totalCount) || 0,
-    classRanking: row.ranking,
-    classFluctuationType: row.fluctuationType,
-    classFluctuation: row.fluctuation,
-  };
+function renderCompareLoading(side) {
+  document.querySelector(`#compare${capitalize(side)}Count`).textContent = "Loading...";
+  document.querySelector(`#compare${capitalize(side)}Meta`).textContent = "";
+  document.querySelector(`#compare${capitalize(side)}Body`).innerHTML =
+    '<tr><td colspan="4" class="empty">Loading ranking data...</td></tr>';
 }
 
-function compactRankFields(row) {
-  const fields = {};
-  for (const key of [
-    "globalRanking",
-    "globalFluctuationType",
-    "globalFluctuation",
-    "classRanking",
-    "classFluctuationType",
-    "classFluctuation",
-    "classTotalCount",
-  ]) {
-    if (row[key] !== undefined) fields[key] = row[key];
-  }
-  return fields;
+function renderCompareError(side) {
+  document.querySelector(`#compare${capitalize(side)}Count`).textContent = "0 rows";
+  document.querySelector(`#compare${capitalize(side)}Meta`).textContent = "";
+  document.querySelector(`#compare${capitalize(side)}Body`).innerHTML =
+    '<tr><td colspan="4" class="empty">Could not load data.</td></tr>';
+}
+
+function getCompareTitle(side) {
+  return side === "left" ? "TEAM A" : "TEAM B";
+}
+
+function renderWinRate() {
+  const leftRows = getCompareRowsForWinRate("left");
+  const rightRows = getCompareRowsForWinRate("right");
+  const leftPower = calculateTopRankingPower(leftRows);
+  const rightPower = calculateTopRankingPower(rightRows);
+  const totalPower = leftPower + rightPower;
+  const leftRate = totalPower ? (leftPower / totalPower) * 100 : 50;
+  const rightRate = totalPower ? 100 - leftRate : 50;
+
+  leftWinRate.textContent = `${Math.round(leftRate)}%`;
+  rightWinRate.textContent = `${Math.round(rightRate)}%`;
+  leftWinBar.style.width = `${leftRate}%`;
+  rightWinBar.style.width = `${rightRate}%`;
+  winRateSummary.textContent = `Calculated from official top 1,000 rows only: TEAM A ${leftRows.length.toLocaleString()} rows, TEAM B ${rightRows.length.toLocaleString()} rows.`;
+}
+
+function getCompareRowsForWinRate(side) {
+  const sideState = compareState[side];
+  return getTopRankingRows(sideState.rows.filter((row) => matchesCompareFilters(row, sideState)));
+}
+
+function getCacheKey(rankingType, regionCode) {
+  return `${rankingType}:${regionCode}`;
 }
 
 function sortRowsForView(rows) {
-  if (state.filters.class) {
-    return [...rows].sort((a, b) => (a.classRanking ?? a.ranking) - (b.classRanking ?? b.ranking));
-  }
-
-  return [...rows].sort((a, b) => {
-    const aHasGlobal = Number.isFinite(a.globalRanking);
-    const bHasGlobal = Number.isFinite(b.globalRanking);
-    if (aHasGlobal && bHasGlobal) return a.globalRanking - b.globalRanking;
-    if (aHasGlobal) return -1;
-    if (bHasGlobal) return 1;
-
-    const normalizedRank = getNormalizedClassRank(a, rows) - getNormalizedClassRank(b, rows);
-    if (normalizedRank) return normalizedRank;
-
-    const classOrder = (weaponTypeOrder.get(a.classCode) ?? 999) - (weaponTypeOrder.get(b.classCode) ?? 999);
-    if (classOrder) return classOrder;
-    return (a.classRanking ?? a.ranking) - (b.classRanking ?? b.ranking);
-  });
-}
-
-function getNormalizedClassRank(row, rows) {
-  const denominator = row.classTotalCount || getVisibleClassCount(row.classCode, rows) || 1;
-  return (row.classRanking ?? row.ranking) / denominator;
-}
-
-function getVisibleClassCount(classCode, rows) {
-  return rows.reduce((count, row) => count + (row.classCode === classCode ? 1 : 0), 0);
+  return sortRowsForViewWithClass(rows, state.filters.class);
 }
 
 function getClassRankingWarningIndex(rows) {
-  if (state.filters.class) return -1;
-  return rows.findIndex((row) => !Number.isFinite(row.globalRanking));
+  return getClassRankingWarningIndexFor(rows, state.filters.class);
 }
 
 function getRankValue(row) {
-  if (state.filters.class) return row.classRanking ?? row.ranking;
-  return row.globalRanking ?? row.classRanking ?? row.ranking;
+  return getRankValueForClass(row, state.filters.class);
 }
 
 function getFlucType(row) {
-  if (state.filters.class) return row.classFluctuationType ?? row.fluctuationType;
-  return row.globalFluctuationType ?? row.classFluctuationType ?? row.fluctuationType;
+  return getFlucTypeForClass(row, state.filters.class);
 }
 
 function getFlucValue(row) {
-  if (state.filters.class) return row.classFluctuation ?? row.fluctuation;
-  return row.globalFluctuation ?? row.classFluctuation ?? row.fluctuation;
+  return getFlucValueForClass(row, state.filters.class);
 }
 
 bindFilters();

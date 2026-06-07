@@ -1,5 +1,6 @@
 const validRegionCodes = new Set(["0", "2010", "3010", "4010"]);
 const validWeaponTypes = new Set(["11", "12", "13", "14", "15", "21", "22", "23", "31", "32", "33"]);
+const validRankingTypes = new Set(["growth", "level"]);
 const classMap = {
   13: "One-handed Sword",
   12: "Twin Sword",
@@ -16,9 +17,15 @@ const classMap = {
 
 module.exports = async function handler(req, res) {
   try {
+    const rankingType = String(req.query.rankingType || "growth");
     const regionCode = String(req.query.regionCode || "0");
     const weaponType = String(req.query.weaponType || "");
     const page = Number(req.query.page || "1");
+
+    if (!validRankingTypes.has(rankingType)) {
+      res.status(400).json({ error: "Invalid rankingType" });
+      return;
+    }
 
     if (!validRegionCodes.has(regionCode)) {
       res.status(400).json({ error: "Invalid regionCode" });
@@ -35,13 +42,14 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    const pageData = await fetchRankingPage(regionCode, page, weaponType);
+    const pageData = await fetchRankingPage(rankingType, regionCode, page, weaponType);
     const rankingData = pageData.props.pageProps.rankingListData;
 
     res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=300");
     res.status(200).json({
-      source: `https://www.nightcrows.com/en/ranking/growth?regionCode=${regionCode}&weaponType=${weaponType}&page=${page}`,
+      source: `https://www.nightcrows.com/en/ranking/${rankingType}?regionCode=${regionCode}&weaponType=${weaponType}&page=${page}`,
       fetchedAt: new Date().toISOString(),
+      rankingType,
       regionCode,
       page,
       baseDt: rankingData.additional?.baseDt || "",
@@ -54,9 +62,9 @@ module.exports = async function handler(req, res) {
   }
 };
 
-async function fetchRankingPage(regionCode, page, weaponType = "") {
-  const url = new URL("https://www.nightcrows.com/en/ranking/growth");
-  url.searchParams.set("rankingType", "growth");
+async function fetchRankingPage(rankingType, regionCode, page, weaponType = "") {
+  const url = new URL(`https://www.nightcrows.com/en/ranking/${rankingType}`);
+  url.searchParams.set("rankingType", rankingType);
   url.searchParams.set("wmsso_sign", "check");
   url.searchParams.set("regionCode", regionCode);
   if (weaponType) url.searchParams.set("weaponType", weaponType);

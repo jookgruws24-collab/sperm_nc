@@ -13,6 +13,7 @@ const types = {
 };
 const validRegionCodes = new Set(["0", "2010", "3010", "4010"]);
 const validWeaponTypes = new Set(["11", "12", "13", "14", "15", "21", "22", "23", "31", "32", "33"]);
+const validRankingTypes = new Set(["growth", "level"]);
 const classMap = {
   13: "One-handed Sword",
   12: "Twin Sword",
@@ -64,8 +65,14 @@ const server = http.createServer((req, res) => {
 
 async function handleRankingApi(url, res) {
   try {
+    const rankingType = url.searchParams.get("rankingType") || "growth";
     const regionCode = url.searchParams.get("regionCode") || "0";
     const weaponType = url.searchParams.get("weaponType") || "";
+    if (!validRankingTypes.has(rankingType)) {
+      sendJson(res, 400, { error: "Invalid rankingType" });
+      return;
+    }
+
     if (!validRegionCodes.has(regionCode)) {
       sendJson(res, 400, { error: "Invalid regionCode" });
       return;
@@ -76,7 +83,7 @@ async function handleRankingApi(url, res) {
       return;
     }
 
-    const cached = cache.get(`${regionCode}:${weaponType || "all"}`);
+    const cached = cache.get(`${rankingType}:${regionCode}:${weaponType || "all"}`);
     if (cached && Date.now() - cached.createdAt < 5 * 60 * 1000) {
       sendJson(res, 200, cached.data);
       return;
@@ -87,7 +94,7 @@ async function handleRankingApi(url, res) {
     let totalCount = 0;
 
     for (let page = 1; page <= 10; page += 1) {
-      const pageData = await fetchRankingPage(regionCode, page, weaponType);
+      const pageData = await fetchRankingPage(rankingType, regionCode, page, weaponType);
       const rankingData = pageData.props.pageProps.rankingListData;
       baseDt = rankingData.additional?.baseDt || baseDt;
       totalCount = rankingData.totalCount || totalCount;
@@ -98,7 +105,8 @@ async function handleRankingApi(url, res) {
     }
 
     const data = {
-      source: `https://www.nightcrows.com/en/ranking/growth?regionCode=${regionCode}`,
+      source: `https://www.nightcrows.com/en/ranking/${rankingType}?regionCode=${regionCode}`,
+      rankingType,
       fetchedAt: new Date().toISOString(),
       regionCode,
       baseDt,
@@ -107,7 +115,7 @@ async function handleRankingApi(url, res) {
       items,
     };
 
-    cache.set(`${regionCode}:${weaponType || "all"}`, { createdAt: Date.now(), data });
+    cache.set(`${rankingType}:${regionCode}:${weaponType || "all"}`, { createdAt: Date.now(), data });
     sendJson(res, 200, data);
   } catch (error) {
     sendJson(res, 500, { error: error.message });
@@ -116,9 +124,15 @@ async function handleRankingApi(url, res) {
 
 async function handleRankingPageApi(url, res) {
   try {
+    const rankingType = url.searchParams.get("rankingType") || "growth";
     const regionCode = url.searchParams.get("regionCode") || "0";
     const weaponType = url.searchParams.get("weaponType") || "";
     const page = Number(url.searchParams.get("page") || "1");
+
+    if (!validRankingTypes.has(rankingType)) {
+      sendJson(res, 400, { error: "Invalid rankingType" });
+      return;
+    }
 
     if (!validRegionCodes.has(regionCode)) {
       sendJson(res, 400, { error: "Invalid regionCode" });
@@ -135,18 +149,19 @@ async function handleRankingPageApi(url, res) {
       return;
     }
 
-    const cacheKey = `${regionCode}:${weaponType || "all"}:${page}`;
+    const cacheKey = `${rankingType}:${regionCode}:${weaponType || "all"}:${page}`;
     const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.createdAt < 5 * 60 * 1000) {
       sendJson(res, 200, cached.data);
       return;
     }
 
-    const pageData = await fetchRankingPage(regionCode, page, weaponType);
+    const pageData = await fetchRankingPage(rankingType, regionCode, page, weaponType);
     const rankingData = pageData.props.pageProps.rankingListData;
     const data = {
-      source: `https://www.nightcrows.com/en/ranking/growth?regionCode=${regionCode}&weaponType=${weaponType}&page=${page}`,
+      source: `https://www.nightcrows.com/en/ranking/${rankingType}?regionCode=${regionCode}&weaponType=${weaponType}&page=${page}`,
       fetchedAt: new Date().toISOString(),
+      rankingType,
       regionCode,
       page,
       baseDt: rankingData.additional?.baseDt || "",
@@ -162,9 +177,9 @@ async function handleRankingPageApi(url, res) {
   }
 }
 
-async function fetchRankingPage(regionCode, page, weaponType = "") {
-  const url = new URL("https://www.nightcrows.com/en/ranking/growth");
-  url.searchParams.set("rankingType", "growth");
+async function fetchRankingPage(rankingType, regionCode, page, weaponType = "") {
+  const url = new URL(`https://www.nightcrows.com/en/ranking/${rankingType}`);
+  url.searchParams.set("rankingType", rankingType);
   url.searchParams.set("wmsso_sign", "check");
   url.searchParams.set("regionCode", regionCode);
   if (weaponType) url.searchParams.set("weaponType", weaponType);

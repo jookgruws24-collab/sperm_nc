@@ -11,7 +11,7 @@
       <section class="toolbar" aria-label="Ranking tools">
         <div>
           <p class="eyebrow">Night Crows</p>
-          <h1>Growth Ranking</h1>
+          <h1 id="pageTitle">Growth Ranking</h1>
         </div>
         <div class="meta">
           <span id="visibleCount">0</span>
@@ -19,71 +19,197 @@
         </div>
       </section>
 
-      <section class="filters" aria-label="Table filters">
-        <label>
-          <span>Region</span>
-          <select id="regionSelect">
-            <option value="0">All</option>
-            <option value="2010">ASIA</option>
-            <option value="3010">NAEU</option>
-            <option value="4010">SA</option>
-          </select>
-        </label>
-        <label>
-          <span>Ranking</span>
-          <input id="filter-ranking" type="search" autocomplete="off" placeholder="Search ranking">
-        </label>
-        <label>
-          <span>Character</span>
-          <input id="filter-character" type="search" autocomplete="off" placeholder="Search character">
-        </label>
-        <label>
-          <span>Class</span>
-          <select id="filter-class">
-            <option value="">All Classes</option>
-          </select>
-        </label>
-        <label>
-          <span>Server</span>
-          <input id="filter-server" type="search" autocomplete="off" placeholder="Search server">
-        </label>
-        <label>
-          <span>Guild</span>
-          <input id="filter-guild" type="search" autocomplete="off" placeholder="Search guild">
-        </label>
-        <label>
-          <span>Union</span>
-          <input id="filter-union" type="search" autocomplete="off" placeholder="Search union">
-        </label>
-      </section>
-
-      <section class="table-wrap" aria-label="Growth ranking table">
-        <table>
-          <thead>
-            <tr>
-              <th>No.</th>
-              <th id="rankHeader">Ranking</th>
-              <th>Character</th>
-              <th>Class</th>
-              <th>Server</th>
-              <th>Guild</th>
-              <th>Union</th>
-              <th>Max Rank Date</th>
-            </tr>
-          </thead>
-          <tbody id="rankingBody">
-            <tr>
-              <td colspan="8" class="empty">Loading ranking data...</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-
-      <nav class="pagination" aria-label="Table pagination">
-        <button id="prevPage" type="button">Previous</button>
-        <span id="pageInfo">Page 1 of 1</span>
-        <button id="nextPage" type="button">Next</button>
+      <nav class="ranking-type-switch" aria-label="Ranking type">
+        <button id="growthTypeBtn" class="active" type="button">Growth</button>
+        <button id="levelTypeBtn" type="button">Level</button>
       </nav>
+
+      <nav class="view-switch" aria-label="Views">
+        <button id="rankingViewBtn" class="active" type="button">Ranking</button>
+        <button id="compareViewBtn" type="button">Compare</button>
+      </nav>
+
+      <section id="rankingScreen">
+        <section class="filters" aria-label="Table filters">
+          <label>
+            <span>Region</span>
+            <select id="regionSelect">
+              <option value="0">All</option>
+              <option value="2010">ASIA</option>
+              <option value="3010">NAEU</option>
+              <option value="4010">SA</option>
+            </select>
+          </label>
+          <label>
+            <span>Ranking</span>
+            <input id="filter-ranking" type="search" autocomplete="off" placeholder="Search ranking">
+          </label>
+          <label>
+            <span>Character</span>
+            <input id="filter-character" type="search" autocomplete="off" placeholder="Search character">
+          </label>
+          <label>
+            <span>Class</span>
+            <select id="filter-class">
+              <option value="">All Classes</option>
+            </select>
+          </label>
+          <label>
+            <span>Server</span>
+            <input id="filter-server" type="search" autocomplete="off" placeholder="Search server">
+          </label>
+          <label>
+            <span>Guild</span>
+            <input id="filter-guild" type="search" autocomplete="off" placeholder="Search guild">
+          </label>
+          <label>
+            <span>Union</span>
+            <input id="filter-union" type="search" autocomplete="off" placeholder="Search union">
+          </label>
+        </section>
+
+        <section class="table-wrap" aria-label="Growth ranking table">
+          <table>
+            <thead>
+              <tr>
+                <th>No.</th>
+                <th id="rankHeader">Ranking</th>
+                <th>Character</th>
+                <th>Class</th>
+                <th>Server</th>
+                <th>Guild</th>
+                <th>Union</th>
+                <th>Max Rank Date</th>
+              </tr>
+            </thead>
+            <tbody id="rankingBody">
+              <tr>
+                <td colspan="8" class="empty">Loading ranking data...</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <nav class="pagination" aria-label="Table pagination">
+          <button id="prevPage" type="button">Previous</button>
+          <span id="pageInfo">Page 1 of 1</span>
+          <button id="nextPage" type="button">Next</button>
+        </nav>
+      </section>
+
+      <section id="compareScreen" hidden>
+        <section class="win-rate-panel" aria-label="Win rate comparison">
+          <div class="win-rate-head">
+            <div>
+              <span>TEAM A</span>
+              <strong id="leftWinRate">50%</strong>
+            </div>
+            <div>
+              <span>TEAM B</span>
+              <strong id="rightWinRate">50%</strong>
+            </div>
+          </div>
+          <div class="win-rate-bars" aria-hidden="true">
+            <div id="leftWinBar" class="left"></div>
+            <div id="rightWinBar" class="right"></div>
+          </div>
+          <p id="winRateSummary">Win rate is calculated from official top 1,000 ranking rows only.</p>
+        </section>
+
+        <div class="compare-grid">
+          <section class="compare-panel" data-side="left">
+            <div class="compare-title">
+              <h2>TEAM A</h2>
+              <span id="compareLeftCount">0 rows</span>
+            </div>
+            <div class="compare-filters">
+              <label>
+                <span>Region</span>
+                <select data-compare-field="regionCode">
+                  <option value="0">All</option>
+                  <option value="2010">ASIA</option>
+                  <option value="3010">NAEU</option>
+                  <option value="4010">SA</option>
+                </select>
+              </label>
+              <label>
+                <span>Server</span>
+                <input data-compare-field="server" type="search" autocomplete="off" placeholder="Search server">
+              </label>
+              <label>
+                <span>Guild</span>
+                <input data-compare-field="guild" type="search" autocomplete="off" placeholder="Search guild">
+              </label>
+              <label>
+                <span>Union</span>
+                <input data-compare-field="union" type="search" autocomplete="off" placeholder="Search union">
+              </label>
+            </div>
+            <div class="table-wrap compare-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>No.</th>
+                    <th>Ranking</th>
+                    <th>Character</th>
+                    <th>Class</th>
+                  </tr>
+                </thead>
+                <tbody id="compareLeftBody">
+                  <tr><td colspan="4" class="empty">No data</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p id="compareLeftMeta" class="compare-meta"></p>
+          </section>
+
+          <section class="compare-panel" data-side="right">
+            <div class="compare-title">
+              <h2>TEAM B</h2>
+              <span id="compareRightCount">0 rows</span>
+            </div>
+            <div class="compare-filters">
+              <label>
+                <span>Region</span>
+                <select data-compare-field="regionCode">
+                  <option value="0">All</option>
+                  <option value="2010">ASIA</option>
+                  <option value="3010">NAEU</option>
+                  <option value="4010">SA</option>
+                </select>
+              </label>
+              <label>
+                <span>Server</span>
+                <input data-compare-field="server" type="search" autocomplete="off" placeholder="Search server">
+              </label>
+              <label>
+                <span>Guild</span>
+                <input data-compare-field="guild" type="search" autocomplete="off" placeholder="Search guild">
+              </label>
+              <label>
+                <span>Union</span>
+                <input data-compare-field="union" type="search" autocomplete="off" placeholder="Search union">
+              </label>
+            </div>
+            <div class="table-wrap compare-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>No.</th>
+                    <th>Ranking</th>
+                    <th>Character</th>
+                    <th>Class</th>
+                  </tr>
+                </thead>
+                <tbody id="compareRightBody">
+                  <tr><td colspan="4" class="empty">No data</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p id="compareRightMeta" class="compare-meta"></p>
+          </section>
+        </div>
+      </section>
     </main>
 
     <div id="loadingOverlay" class="loading-overlay" hidden>
@@ -99,6 +225,6 @@
       </div>
     </div>
 
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

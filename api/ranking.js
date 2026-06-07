@@ -1,4 +1,5 @@
 const validRegionCodes = new Set(["0", "2010", "3010", "4010"]);
+const validRankingTypes = new Set(["growth", "level"]);
 const classMap = {
   13: "One-handed Sword",
   12: "Twin Sword",
@@ -15,7 +16,13 @@ const classMap = {
 
 module.exports = async function handler(req, res) {
   try {
+    const rankingType = String(req.query.rankingType || "growth");
     const regionCode = String(req.query.regionCode || "0");
+    if (!validRankingTypes.has(rankingType)) {
+      res.status(400).json({ error: "Invalid rankingType" });
+      return;
+    }
+
     if (!validRegionCodes.has(regionCode)) {
       res.status(400).json({ error: "Invalid regionCode" });
       return;
@@ -26,7 +33,7 @@ module.exports = async function handler(req, res) {
     let totalCount = 0;
 
     for (let page = 1; page <= 10; page += 1) {
-      const pageData = await fetchRankingPage(regionCode, page);
+      const pageData = await fetchRankingPage(rankingType, regionCode, page);
       const rankingData = pageData.props.pageProps.rankingListData;
       baseDt = rankingData.additional?.baseDt || baseDt;
       totalCount = rankingData.totalCount || totalCount;
@@ -38,8 +45,9 @@ module.exports = async function handler(req, res) {
 
     res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=300");
     res.status(200).json({
-      source: `https://www.nightcrows.com/en/ranking/growth?regionCode=${regionCode}`,
+      source: `https://www.nightcrows.com/en/ranking/${rankingType}?regionCode=${regionCode}`,
       fetchedAt: new Date().toISOString(),
+      rankingType,
       regionCode,
       baseDt,
       total: items.length,
@@ -51,9 +59,9 @@ module.exports = async function handler(req, res) {
   }
 };
 
-async function fetchRankingPage(regionCode, page) {
-  const url = new URL("https://www.nightcrows.com/en/ranking/growth");
-  url.searchParams.set("rankingType", "growth");
+async function fetchRankingPage(rankingType, regionCode, page) {
+  const url = new URL(`https://www.nightcrows.com/en/ranking/${rankingType}`);
+  url.searchParams.set("rankingType", rankingType);
   url.searchParams.set("wmsso_sign", "check");
   url.searchParams.set("regionCode", regionCode);
   url.searchParams.set("page", String(page));
