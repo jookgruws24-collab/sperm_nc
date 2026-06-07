@@ -1,0 +1,96 @@
+const validRegionCodes = new Set(["0", "2010", "3010", "4010"]);
+const classMap = {
+  11: "Sword",
+  12: "Twin Sword",
+  13: "Spear",
+  14: "Wand",
+  15: "Dagger",
+  21: "Bow",
+  22: "Crossbow",
+  23: "Staff",
+  31: "Two-handed Sword",
+  32: "Rapier",
+  33: "Orb",
+};
+
+module.exports = async function handler(req, res) {
+  try {
+    const regionCode = String(req.query.regionCode || "0");
+    if (!validRegionCodes.has(regionCode)) {
+      res.status(400).json({ error: "Invalid regionCode" });
+      return;
+    }
+
+    const items = [];
+    let baseDt = "";
+    let totalCount = 0;
+
+    for (let page = 1; page <= 10; page += 1) {
+      const pageData = await fetchRankingPage(regionCode, page);
+      const rankingData = pageData.props.pageProps.rankingListData;
+      baseDt = rankingData.additional?.baseDt || baseDt;
+      totalCount = rankingData.totalCount || totalCount;
+
+      for (const item of rankingData.items || []) {
+        items.push(transformRankingItem(item, page));
+      }
+    }
+
+    res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=300");
+    res.status(200).json({
+      source: `https://www.nightcrows.com/en/ranking/growth?regionCode=${regionCode}`,
+      fetchedAt: new Date().toISOString(),
+      regionCode,
+      baseDt,
+      total: items.length,
+      totalCount,
+      items,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+async function fetchRankingPage(regionCode, page) {
+  const url = new URL("https://www.nightcrows.com/en/ranking/growth");
+  url.searchParams.set("rankingType", "growth");
+  url.searchParams.set("wmsso_sign", "check");
+  url.searchParams.set("regionCode", regionCode);
+  url.searchParams.set("page", String(page));
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Night Crows returned HTTP ${response.status} for page ${page}`);
+  }
+
+  const html = await response.text();
+  const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+  if (!match) {
+    throw new Error(`Could not find __NEXT_DATA__ for page ${page}`);
+  }
+
+  return JSON.parse(match[1]);
+}
+
+function transformRankingItem(item, sourcePage) {
+  const delta = item.deltaRank;
+  const fluctuationType = delta === null ? "new" : delta > 0 ? "up" : delta < 0 ? "down" : "same";
+  const fluctuation = delta === null ? "NEW" : delta === 0 ? "-" : String(Math.abs(delta));
+  const classCode = Number(item.pcWeaponType);
+
+  return {
+    ranking: Number(item.rank),
+    fluctuationType,
+    fluctuation,
+    character: item.CharacterName || "",
+    class: classMap[classCode] || `Type ${item.pcWeaponType}`,
+    classCode,
+    server: `${item.RealmGroupName || ""}/${item.RealmName || ""}`,
+    guild: item.GuildName || "",
+    union: item.GuildUnionName || "",
+    region: item.RegionName || "",
+    regionCode: item.RegionID || "",
+    sourcePage,
+    maxRankDate: item.MaxRankDate || "",
+  };
+}
