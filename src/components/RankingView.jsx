@@ -1,5 +1,5 @@
 import { useDeferredValue, useMemo, useState } from "react";
-import { defaultPageSize, regions, weaponTypes } from "../lib/config.js";
+import { defaultPageSize, regions, servers, weaponTypes } from "../lib/config.js";
 import { normalize, formatDate } from "../lib/utils.js";
 import {
   getClassRankingWarningIndex,
@@ -11,6 +11,7 @@ import {
 import { useRankingData } from "../hooks/useRankingData.js";
 import RankBadge from "./RankBadge.jsx";
 import Pagination from "./Pagination.jsx";
+import SearchSelect from "./SearchSelect.jsx";
 import StatusBanner from "./StatusBanner.jsx";
 
 const searchFields = [
@@ -108,14 +109,24 @@ export default function RankingView({ rankingType }) {
         {searchFields.map(({ field, label }) => (
           <label key={field} className="flex flex-col gap-1">
             <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{label}</span>
-            <input
-              type="search"
-              autoComplete="off"
-              placeholder={`Search ${label.toLocaleLowerCase()}`}
-              value={filters[field]}
-              onChange={(event) => setFilter(field, event.target.value)}
-              className={inputClass}
-            />
+            {field === "server" ? (
+              <SearchSelect
+                value={filters.server}
+                onChange={(value) => setFilter("server", value)}
+                options={servers}
+                placeholder="Select server"
+                className={inputClass}
+              />
+            ) : (
+              <input
+                type="search"
+                autoComplete="off"
+                placeholder={`Search ${label.toLocaleLowerCase()}`}
+                value={filters[field]}
+                onChange={(event) => setFilter(field, event.target.value)}
+                className={inputClass}
+              />
+            )}
           </label>
         ))}
         <div className="flex items-end">

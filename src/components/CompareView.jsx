@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { compareRowsPerTable, regions } from "../lib/config.js";
+import { compareRowsPerTable, regions, servers } from "../lib/config.js";
 import { normalize } from "../lib/utils.js";
 import {
   calculateTopRankingPower,
@@ -12,6 +12,7 @@ import {
 } from "../lib/ranking.js";
 import { useRankingData } from "../hooks/useRankingData.js";
 import RankBadge from "./RankBadge.jsx";
+import SearchSelect from "./SearchSelect.jsx";
 
 const emptyFilters = { server: "", guild: "", union: "" };
 
@@ -124,7 +125,14 @@ function ComparePanel({ title, accent, regionCode, onRegionChange, filters, onFi
             <option key={region.code} value={region.code}>{region.name}</option>
           ))}
         </select>
-        {["server", "guild", "union"].map((field) => (
+        <SearchSelect
+          value={filters.server}
+          onChange={(value) => onFiltersChange({ ...filters, server: value })}
+          options={servers}
+          placeholder="Select server"
+          className={inputClass}
+        />
+        {["guild", "union"].map((field) => (
           <input
             key={field}
             type="search"
