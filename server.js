@@ -1,20 +1,29 @@
-const http = require("http");
-const fs = require("fs");
-const path = require("path");
+import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import zlib from "node:zlib";
+import { fileURLToPath } from "node:url";
 
-const root = __dirname;
+const root = path.dirname(fileURLToPath(import.meta.url));
+const distDir = path.join(root, "dist");
 const port = Number(process.env.PORT || 8000);
-const host = "127.0.0.1";
+const host = process.env.HOST || "127.0.0.1";
+
 const types = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".woff2": "font/woff2",
 };
+
 const validRegionCodes = new Set(["0", "2010", "3010", "4010"]);
 const validWeaponTypes = new Set(["11", "12", "13", "14", "15", "21", "22", "23", "31", "32", "33"]);
 const validRankingTypes = new Set(["growth", "level"]);
-const maxConcurrentPageFetches = 6;
+const maxConcurrentPageFetches = 8;
+
 const classMap = {
   13: "One-handed Sword",
   12: "Twin Sword",
@@ -28,28 +37,53 @@ const classMap = {
   23: "Rapier",
   15: "Cannon",
 };
-const cache = new Map();
 
-const server = http.createServer((req, res) => {
+// --- API optimizations ---
+// 1. Fresh cache (5 min) + stale-while-revalidate (30 min): stale entries are
+//    served instantly while a background refresh updates the cache.
+// 2. In-flight request deduplication: concurrent identical requests share one
+//    upstream fetch instead of hammering nightcrows.com.
+// 3. Gzip compression for JSON responses (the full dataset shrinks ~10x).
+const FRESH_MS = 5 * 60 * 1000;
+const STALE_MS = 30 * 60 * 1000;
+const cache = new Map();
+const inflight = new Map();
+
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${host}:${port}`);
 
   if (url.pathname === "/api/ranking") {
-    handleRankingApi(url, res);
+    await handleRankingApi(req, url, res);
     return;
   }
 
   if (url.pathname === "/api/ranking-page") {
-    handleRankingPageApi(url, res);
+    await handleRankingPageApi(req, url, res);
+    return;
+  }
+
+  serveStatic(url, res);
+});
+
+function serveStatic(url, res) {
+  if (!fs.existsSync(distDir)) {
+    res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Frontend not built yet. Run `npm run build` first, or use `npm run dev` for development.");
     return;
   }
 
   const requested = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname.slice(1));
-  const file = path.resolve(root, requested);
+  let file = path.resolve(distDir, requested);
 
-  if (!file.startsWith(root)) {
+  if (!file.startsWith(distDir)) {
     res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("Forbidden");
     return;
+  }
+
+  // SPA fallback for paths without a file extension
+  if (!fs.existsSync(file) && !path.extname(file)) {
+    file = path.join(distDir, "index.html");
   }
 
   fs.readFile(file, (error, data) => {
@@ -59,121 +93,116 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    res.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream" });
+    const isAsset = /\.(js|css|woff2|png|svg)$/.test(file);
+    res.writeHead(200, {
+      "Content-Type": types[path.extname(file)] || "application/octet-stream",
+      "Cache-Control": isAsset ? "public, max-age=31536000, immutable" : "no-cache",
+    });
     res.end(data);
   });
-});
+}
 
-async function handleRankingApi(url, res) {
+async function getCachedOrFetch(cacheKey, fetcher, res, req) {
+  const cached = cache.get(cacheKey);
+  const age = cached ? Date.now() - cached.createdAt : Infinity;
+
+  if (cached && age < FRESH_MS) {
+    sendJson(req, res, 200, cached.data, "HIT");
+    return;
+  }
+
+  if (cached && age < STALE_MS) {
+    // Serve stale immediately, refresh in the background.
+    sendJson(req, res, 200, cached.data, "STALE");
+    if (!inflight.has(cacheKey)) {
+      const refresh = fetcher()
+        .then((data) => cache.set(cacheKey, { createdAt: Date.now(), data }))
+        .catch(() => {})
+        .finally(() => inflight.delete(cacheKey));
+      inflight.set(cacheKey, refresh);
+    }
+    return;
+  }
+
+  let promise = inflight.get(cacheKey);
+  if (!promise) {
+    promise = fetcher().finally(() => inflight.delete(cacheKey));
+    inflight.set(cacheKey, promise);
+  }
+
+  const data = await promise;
+  cache.set(cacheKey, { createdAt: Date.now(), data });
+  sendJson(req, res, 200, data, "MISS");
+}
+
+async function handleRankingApi(req, url, res) {
   try {
     const rankingType = url.searchParams.get("rankingType") || "growth";
     const regionCode = url.searchParams.get("regionCode") || "0";
     const weaponType = url.searchParams.get("weaponType") || "";
     const weaponTypes = parseWeaponTypes(url.searchParams.get("weaponTypes"));
     const includeGlobal = url.searchParams.get("includeGlobal") === "1" || url.searchParams.get("includeGlobal") === "true";
-    if (!validRankingTypes.has(rankingType)) {
-      sendJson(res, 400, { error: "Invalid rankingType" });
-      return;
-    }
 
-    if (!validRegionCodes.has(regionCode)) {
-      sendJson(res, 400, { error: "Invalid regionCode" });
-      return;
-    }
-
-    if (weaponTypes.some((value) => !validWeaponTypes.has(value))) {
-      sendJson(res, 400, { error: "Invalid weaponTypes" });
-      return;
-    }
+    if (!validRankingTypes.has(rankingType)) return sendJson(req, res, 400, { error: "Invalid rankingType" });
+    if (!validRegionCodes.has(regionCode)) return sendJson(req, res, 400, { error: "Invalid regionCode" });
+    if (weaponType && !validWeaponTypes.has(weaponType)) return sendJson(req, res, 400, { error: "Invalid weaponType" });
+    if (weaponTypes.some((value) => !validWeaponTypes.has(value))) return sendJson(req, res, 400, { error: "Invalid weaponTypes" });
 
     const requestedWeaponTypes = buildRequestedWeaponTypes(includeGlobal, weaponType, weaponTypes);
     const cacheKey = `${rankingType}:${regionCode}:${includeGlobal ? "global+" : ""}${requestedWeaponTypes.filter(Boolean).join(",") || "all"}`;
-    if (weaponType && !validWeaponTypes.has(weaponType)) {
-      sendJson(res, 400, { error: "Invalid weaponType" });
-      return;
-    }
 
-    const cached = cache.get(cacheKey);
-    if (cached && Date.now() - cached.createdAt < 5 * 60 * 1000) {
-      sendJson(res, 200, cached.data);
-      return;
-    }
-
-    const { items, baseDt, totalCount } = await fetchRankingTasks(rankingType, regionCode, requestedWeaponTypes);
-
-    const data = {
-      source: `https://www.nightcrows.com/en/ranking/${rankingType}?regionCode=${regionCode}`,
-      rankingType,
-      fetchedAt: new Date().toISOString(),
-      regionCode,
-      weaponType,
-      weaponTypes: requestedWeaponTypes.filter(Boolean),
-      includeGlobal,
-      baseDt,
-      total: items.length,
-      totalCount,
-      items,
-    };
-
-    cache.set(cacheKey, { createdAt: Date.now(), data });
-    sendJson(res, 200, data);
+    await getCachedOrFetch(cacheKey, async () => {
+      const { items, baseDt, totalCount } = await fetchRankingTasks(rankingType, regionCode, requestedWeaponTypes);
+      return {
+        source: `https://www.nightcrows.com/en/ranking/${rankingType}?regionCode=${regionCode}`,
+        rankingType,
+        fetchedAt: new Date().toISOString(),
+        regionCode,
+        weaponType,
+        weaponTypes: requestedWeaponTypes.filter(Boolean),
+        includeGlobal,
+        baseDt,
+        total: items.length,
+        totalCount,
+        items,
+      };
+    }, res, req);
   } catch (error) {
-    sendJson(res, 500, { error: error.message });
+    sendJson(req, res, 500, { error: error.message });
   }
 }
 
-async function handleRankingPageApi(url, res) {
+async function handleRankingPageApi(req, url, res) {
   try {
     const rankingType = url.searchParams.get("rankingType") || "growth";
     const regionCode = url.searchParams.get("regionCode") || "0";
     const weaponType = url.searchParams.get("weaponType") || "";
     const page = Number(url.searchParams.get("page") || "1");
 
-    if (!validRankingTypes.has(rankingType)) {
-      sendJson(res, 400, { error: "Invalid rankingType" });
-      return;
-    }
+    if (!validRankingTypes.has(rankingType)) return sendJson(req, res, 400, { error: "Invalid rankingType" });
+    if (!validRegionCodes.has(regionCode)) return sendJson(req, res, 400, { error: "Invalid regionCode" });
+    if (!Number.isInteger(page) || page < 1 || page > 10) return sendJson(req, res, 400, { error: "Invalid page" });
+    if (weaponType && !validWeaponTypes.has(weaponType)) return sendJson(req, res, 400, { error: "Invalid weaponType" });
 
-    if (!validRegionCodes.has(regionCode)) {
-      sendJson(res, 400, { error: "Invalid regionCode" });
-      return;
-    }
+    const cacheKey = `page:${rankingType}:${regionCode}:${weaponType || "all"}:${page}`;
 
-    if (!Number.isInteger(page) || page < 1 || page > 10) {
-      sendJson(res, 400, { error: "Invalid page" });
-      return;
-    }
-
-    if (weaponType && !validWeaponTypes.has(weaponType)) {
-      sendJson(res, 400, { error: "Invalid weaponType" });
-      return;
-    }
-
-    const cacheKey = `${rankingType}:${regionCode}:${weaponType || "all"}:${page}`;
-    const cached = cache.get(cacheKey);
-    if (cached && Date.now() - cached.createdAt < 5 * 60 * 1000) {
-      sendJson(res, 200, cached.data);
-      return;
-    }
-
-    const pageData = await fetchRankingPage(rankingType, regionCode, page, weaponType);
-    const rankingData = pageData.props.pageProps.rankingListData;
-    const data = {
-      source: `https://www.nightcrows.com/en/ranking/${rankingType}?regionCode=${regionCode}&weaponType=${weaponType}&page=${page}`,
-      fetchedAt: new Date().toISOString(),
-      rankingType,
-      regionCode,
-      page,
-      baseDt: rankingData.additional?.baseDt || "",
-      total: rankingData.items?.length || 0,
-      totalCount: rankingData.totalCount || 0,
-      items: (rankingData.items || []).map((item) => transformRankingItem(item, page, rankingData.totalCount)),
-    };
-
-    cache.set(cacheKey, { createdAt: Date.now(), data });
-    sendJson(res, 200, data);
+    await getCachedOrFetch(cacheKey, async () => {
+      const pageData = await fetchRankingPage(rankingType, regionCode, page, weaponType);
+      const rankingData = pageData.props.pageProps.rankingListData;
+      return {
+        source: `https://www.nightcrows.com/en/ranking/${rankingType}?regionCode=${regionCode}&weaponType=${weaponType}&page=${page}`,
+        fetchedAt: new Date().toISOString(),
+        rankingType,
+        regionCode,
+        page,
+        baseDt: rankingData.additional?.baseDt || "",
+        total: rankingData.items?.length || 0,
+        totalCount: rankingData.totalCount || 0,
+        items: (rankingData.items || []).map((item) => transformRankingItem(item, page, rankingData.totalCount)),
+      };
+    }, res, req);
   } catch (error) {
-    sendJson(res, 500, { error: error.message });
+    sendJson(req, res, 500, { error: error.message });
   }
 }
 
@@ -277,11 +306,33 @@ function transformRankingItem(item, sourcePage, sourceTotalCount, sourceScope) {
   };
 }
 
-function sendJson(res, status, data) {
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(data));
+function sendJson(req, res, status, data, cacheStatus) {
+  const body = JSON.stringify(data);
+  const headers = {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": status === 200 ? "public, max-age=60" : "no-store",
+  };
+  if (cacheStatus) headers["X-Cache"] = cacheStatus;
+
+  const acceptsGzip = /\bgzip\b/.test(req?.headers?.["accept-encoding"] || "");
+  if (status === 200 && acceptsGzip && body.length > 1024) {
+    zlib.gzip(Buffer.from(body), (error, compressed) => {
+      if (error) {
+        res.writeHead(status, headers);
+        res.end(body);
+        return;
+      }
+      headers["Content-Encoding"] = "gzip";
+      res.writeHead(status, headers);
+      res.end(compressed);
+    });
+    return;
+  }
+
+  res.writeHead(status, headers);
+  res.end(body);
 }
 
 server.listen(port, host, () => {
-  console.log(`Night Crows ranking viewer: http://${host}:${port}/`);
+  console.log(`Night Crows ranking API + app: http://${host}:${port}/`);
 });
