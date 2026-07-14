@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { loadRanking } from "../lib/api.js";
+import { loadRanking, onRankingProgress } from "../lib/api.js";
 
 export function useRankingData(rankingType, regionCode) {
   const [state, setState] = useState({ rows: [], status: "loading", partial: false });
@@ -8,11 +8,13 @@ export function useRankingData(rankingType, regionCode) {
     let alive = true;
     setState({ rows: [], status: "loading", partial: false });
 
-    loadRanking(rankingType, regionCode, {
-      onPartial: (rows) => {
-        if (alive) setState({ rows, status: "ready", partial: true });
-      },
-    })
+    const onPartial = (rows) => {
+      if (alive) setState({ rows, status: "ready", partial: true });
+    };
+
+    const unsubscribe = onRankingProgress(rankingType, regionCode, onPartial);
+
+    loadRanking(rankingType, regionCode, { onPartial })
       .then((rows) => {
         if (alive) setState({ rows, status: "ready", partial: false });
       })
@@ -23,6 +25,7 @@ export function useRankingData(rankingType, regionCode) {
 
     return () => {
       alive = false;
+      unsubscribe();
     };
   }, [rankingType, regionCode]);
 

@@ -5,6 +5,10 @@ import { annotateRankScope, mergeRankingRows } from "./ranking.js";
 // A dataset is fetched at most once per (rankingType, regionCode) per session.
 const cache = new Map();
 
+// Class rankings are loaded in small chunks so each serverless invocation
+// stays fast (well under Vercel's timeout) and the UI updates progressively.
+const classChunks = chunk(weaponTypes.map((weaponType) => weaponType.code), 3);
+
 async function fetchBatch(rankingType, regionCode, { weaponTypeCodes, includeGlobal } = {}) {
   const params = new URLSearchParams({ rankingType, regionCode });
   if (weaponTypeCodes?.length === 1) params.set("weaponType", weaponTypeCodes[0]);
@@ -22,11 +26,20 @@ function annotateItems(data) {
   );
 }
 
+function chunk(list, size) {
+  const chunks = [];
+  for (let index = 0; index < list.length; index += size) {
+    chunks.push(list.slice(index, index + size));
+  }
+  return chunks;
+}
+
 /**
  * Progressive loader:
  * 1. Fetches the global top 1,000 first (1 small request) and reports it
  *    via onPartial so the UI can render almost immediately.
- * 2. Fetches all class rankings in one batched request, merges, and resolves.
+ * 2. Fetches class rankings in parallel chunks, merging and reporting
+ *    after each chunk resolves.
  */
 export function loadRanking(rankingType, regionCode, { onPartial } = {}) {
   const key = `${rankingType}:${regionCode}`;
@@ -37,22 +50,44 @@ export function loadRanking(rankingType, regionCode, { onPartial } = {}) {
     return cached.promise;
   }
 
-  const entry = { rows: null, complete: false };
+  const entry = { rows: null, complete: false, listeners: new Set() };
+  if (onPartial) entry.listeners.add(onPartial);
+
+  const notify = () => {
+    for (const listener of entry.listeners) listener(entry.rows);
+  };
+
   entry.promise = (async () => {
     const globalData = await fetchBatch(rankingType, regionCode, { includeGlobal: true, weaponTypeCodes: [] });
-    const globalRows = annotateItems(globalData);
-    entry.rows = mergeRankingRows(globalRows);
-    onPartial?.(entry.rows);
+    let allRows = annotateItems(globalData);
+    entry.rows = mergeRankingRows(allRows);
+    notify();
 
-    const classData = await fetchBatch(rankingType, regionCode, {
-      weaponTypeCodes: weaponTypes.map((weaponType) => weaponType.code),
-    });
-    entry.rows = mergeRankingRows([...globalRows, ...annotateItems(classData)]);
+    await Promise.all(
+      classChunks.map(async (weaponTypeCodes) => {
+        const classData = await fetchBatch(rankingType, regionCode, { weaponTypeCodes });
+        allRows = [...allRows, ...annotateItems(classData)];
+        entry.rows = mergeRankingRows(allRows);
+        notify();
+      })
+    );
+
     entry.complete = true;
+    entry.listeners.clear();
     return entry.rows;
   })();
 
   cache.set(key, entry);
   entry.promise.catch(() => cache.delete(key));
   return entry.promise;
+}
+
+/** Subscribe to progressive updates for an in-flight load. */
+export function onRankingProgress(rankingType, regionCode, listener) {
+  const entry = cache.get(`${rankingType}:${regionCode}`);
+  if (entry && !entry.complete) {
+    entry.listeners.add(listener);
+    return () => entry.listeners.delete(listener);
+  }
+  return () => {};
 }
