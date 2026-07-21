@@ -76,24 +76,48 @@ export default function ServerCheckboxSelect({ selected, onChange, options, plac
     onChange(checked ? [...withoutGroup, ...group.children] : withoutGroup);
   }
 
-  const summary =
-    selected.length === 0
-      ? placeholder
-      : selected.length <= 2
-        ? selected.join(", ")
-        : `${selected.length} servers selected`;
-
   return (
     <div ref={containerRef} className="relative">
-      <button
-        type="button"
+      <div
         onClick={() => setOpen((value) => !value)}
+        role="button"
+        tabIndex={0}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 rounded-lg border border-night-600 bg-night-900 px-3 py-2 text-left text-sm transition-colors focus:border-gold-500 focus:outline-none"
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setOpen((value) => !value);
+          }
+        }}
+        className="flex min-h-[2.5rem] w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-night-600 bg-night-900 px-2 py-1.5 text-left text-sm transition-colors focus-within:border-gold-500 focus:border-gold-500 focus:outline-none"
       >
-        <span className={`truncate ${selected.length ? "text-zinc-200" : "text-zinc-600"}`}>{summary}</span>
-        <span className="shrink-0 text-zinc-500">{open ? "▲" : "▼"}</span>
-      </button>
+        {selected.length === 0 ? (
+          <span className="px-1 text-zinc-600">{placeholder}</span>
+        ) : (
+          <div className="flex flex-1 flex-wrap items-center gap-1">
+            {selected.map((server) => (
+              <span
+                key={server}
+                className="inline-flex items-center gap-1 rounded-md bg-gold-500/15 px-2 py-0.5 text-xs font-medium text-gold-300"
+              >
+                {server}
+                <button
+                  type="button"
+                  aria-label={`Remove ${server}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onChange(selected.filter((item) => item !== server));
+                  }}
+                  className="text-gold-300/70 transition-colors hover:text-white"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <span className="shrink-0 pr-1 text-zinc-500">{open ? "▲" : "▼"}</span>
+      </div>
 
       {open && (
         <div className="absolute z-30 mt-1 w-full min-w-[16rem] rounded-lg border border-night-600 bg-night-900 shadow-xl shadow-black/40">
