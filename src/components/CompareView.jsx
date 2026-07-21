@@ -12,7 +12,7 @@ import {
 } from "../lib/ranking.js";
 import { useRankingData } from "../hooks/useRankingData.js";
 import RankBadge from "./RankBadge.jsx";
-import MultiSearchSelect from "./MultiSearchSelect.jsx";
+import ServerCheckboxSelect from "./ServerCheckboxSelect.jsx";
 
 const emptyFilters = { servers: [], guild: "", union: "" };
 
@@ -142,25 +142,12 @@ function ComparePanel({ title, accent, regionCode, onRegionChange, filters, onFi
             />
           ))}
         </div>
-        <div className="flex items-start gap-2">
-          <div className="flex-1">
-            <MultiSearchSelect
-              selected={filters.servers}
-              onChange={(values) => onFiltersChange({ ...filters, servers: values })}
-              options={servers}
-              placeholder="Add servers (multiple)"
-            />
-          </div>
-          {filters.servers.length > 0 && (
-            <button
-              type="button"
-              onClick={() => onFiltersChange({ ...filters, servers: [] })}
-              className="shrink-0 rounded-lg border border-night-600 bg-night-900 px-3 py-2 text-xs font-medium text-zinc-400 transition-colors hover:border-rose-500/50 hover:text-rose-300"
-            >
-              Clear
-            </button>
-          )}
-        </div>
+        <ServerCheckboxSelect
+          selected={filters.servers}
+          onChange={(values) => onFiltersChange({ ...filters, servers: values })}
+          options={servers}
+          placeholder="Select servers (multiple)"
+        />
       </div>
 
       <div className="max-h-[28rem] overflow-y-auto rounded-xl border border-night-700">
