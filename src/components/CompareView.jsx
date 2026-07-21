@@ -12,9 +12,9 @@ import {
 } from "../lib/ranking.js";
 import { useRankingData } from "../hooks/useRankingData.js";
 import RankBadge from "./RankBadge.jsx";
-import SearchSelect from "./SearchSelect.jsx";
+import MultiSearchSelect from "./MultiSearchSelect.jsx";
 
-const emptyFilters = { server: "", guild: "", union: "" };
+const emptyFilters = { servers: [], guild: "", union: "" };
 
 const inputClass =
   "w-full rounded-lg border border-night-600 bg-night-900 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 transition-colors focus:border-gold-500 focus:outline-none";
@@ -94,12 +94,16 @@ export default function CompareView({ rankingType }) {
 
 function useCompareRows(rows, filters) {
   return useMemo(() => {
-    const active = Object.entries(filters)
-      .map(([field, value]) => [field, normalize(value)])
-      .filter(([, value]) => value);
-    const matched = active.length
-      ? rows.filter((row) => active.every(([field, query]) => normalize(row[field]).includes(query)))
-      : rows;
+    const serverSet = filters.servers.length ? new Set(filters.servers) : null;
+    const guild = normalize(filters.guild);
+    const union = normalize(filters.union);
+
+    const matched = rows.filter((row) => {
+      if (serverSet && !serverSet.has(row.server)) return false;
+      if (guild && !normalize(row.guild).includes(guild)) return false;
+      if (union && !normalize(row.union).includes(union)) return false;
+      return true;
+    });
     return sortRowsForView(matched, "");
   }, [rows, filters]);
 }
@@ -119,30 +123,44 @@ function ComparePanel({ title, accent, regionCode, onRegionChange, filters, onFi
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <select value={regionCode} onChange={(event) => onRegionChange(event.target.value)} className={inputClass}>
-          {regions.map((region) => (
-            <option key={region.code} value={region.code}>{region.name}</option>
+      <div className="flex flex-col gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <select value={regionCode} onChange={(event) => onRegionChange(event.target.value)} className={inputClass}>
+            {regions.map((region) => (
+              <option key={region.code} value={region.code}>{region.name}</option>
+            ))}
+          </select>
+          {["guild", "union"].map((field) => (
+            <input
+              key={field}
+              type="search"
+              autoComplete="off"
+              placeholder={`Search ${field}`}
+              value={filters[field]}
+              onChange={(event) => onFiltersChange({ ...filters, [field]: event.target.value })}
+              className={inputClass}
+            />
           ))}
-        </select>
-        <SearchSelect
-          value={filters.server}
-          onChange={(value) => onFiltersChange({ ...filters, server: value })}
-          options={servers}
-          placeholder="Select server"
-          className={inputClass}
-        />
-        {["guild", "union"].map((field) => (
-          <input
-            key={field}
-            type="search"
-            autoComplete="off"
-            placeholder={`Search ${field}`}
-            value={filters[field]}
-            onChange={(event) => onFiltersChange({ ...filters, [field]: event.target.value })}
-            className={inputClass}
-          />
-        ))}
+        </div>
+        <div className="flex items-start gap-2">
+          <div className="flex-1">
+            <MultiSearchSelect
+              selected={filters.servers}
+              onChange={(values) => onFiltersChange({ ...filters, servers: values })}
+              options={servers}
+              placeholder="Add servers (multiple)"
+            />
+          </div>
+          {filters.servers.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onFiltersChange({ ...filters, servers: [] })}
+              className="shrink-0 rounded-lg border border-night-600 bg-night-900 px-3 py-2 text-xs font-medium text-zinc-400 transition-colors hover:border-rose-500/50 hover:text-rose-300"
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="max-h-[28rem] overflow-y-auto rounded-xl border border-night-700">
